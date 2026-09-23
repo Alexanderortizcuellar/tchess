@@ -10,12 +10,33 @@ pub struct MoveNode {
     pub san: String,
     pub pos: Chess,
     pub last_move: Option<Move>,
+    pub comment: String,
 }
 
 #[derive(Clone, Debug)]
 pub struct PgnGame {
     pub headers: HashMap<String, String>,
     pub moves: Vec<MoveNode>,
+}
+
+pub fn strip_annotations(comment: &str) -> String {
+    let mut result = String::with_capacity(comment.len());
+    let mut chars = comment.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '[' && chars.peek() == Some(&'%') {
+            for c in chars.by_ref() {
+                if c == ']' {
+                    break;
+                }
+            }
+            continue;
+        }
+        result.push(ch);
+    }
+
+    let words: Vec<&str> = result.split_whitespace().collect();
+    words.join(" ")
 }
 
 impl PgnGame {
@@ -28,6 +49,7 @@ impl PgnGame {
                 san: "Start".to_string(),
                 pos: start_pos,
                 last_move: None,
+                comment: String::new(),
             }],
         }
     }
@@ -55,8 +77,20 @@ impl PgnGame {
                             san: san_str,
                             pos: next_pos.clone(),
                             last_move: Some(m),
+                            comment: String::new(),
                         });
                         self.current_pos = next_pos;
+                    }
+                }
+            }
+
+            fn comment(&mut self, comment: pgn_reader::RawComment<'_>) {
+                if let Ok(comment_str) = std::str::from_utf8(comment.as_bytes()) {
+                    if let Some(last_node) = self.game.moves.last_mut() {
+                        if !last_node.comment.is_empty() {
+                            last_node.comment.push(' ');
+                        }
+                        last_node.comment.push_str(comment_str.trim());
                     }
                 }
             }
@@ -88,6 +122,7 @@ impl PgnGame {
                     san: "Start".to_string(),
                     pos: Chess::default(),
                     last_move: None,
+                    comment: String::new(),
                 }],
             },
             current_pos: Chess::default(),
@@ -147,5 +182,30 @@ mod tests {
         let game = PgnGame::parse(MORPHY_OPERA);
         assert_eq!(game.white_player(), "Paul Morphy");
         assert_eq!(game.total_ply(), 33);
+    }
+
+    #[test]
+    fn test_comments_and_annotation_stripping() {
+        let pgn = r#"[Event "Test Game"]
+[White "Player1"]
+[Black "Player2"]
+
+1. e4 { [%clk 0:05:00] [%eval 0.25] Best by test. } 1... e5 { [%clk 0:04:58] [%eval 0.20] Standard reply. }
+2. Nf3 { [%eval #3] White threatens e5 } *
+"#;
+        let game = PgnGame::parse(pgn);
+        assert_eq!(game.total_ply(), 3);
+        let node1 = game.get_node(1);
+        assert_eq!(node1.san, "e4");
+        assert_eq!(node1.comment, "[%clk 0:05:00] [%eval 0.25] Best by test.");
+        assert_eq!(strip_annotations(&node1.comment), "Best by test.");
+
+        let node2 = game.get_node(2);
+        assert_eq!(node2.san, "e5");
+        assert_eq!(strip_annotations(&node2.comment), "Standard reply.");
+
+        let node3 = game.get_node(3);
+        assert_eq!(node3.san, "Nf3");
+        assert_eq!(strip_annotations(&node3.comment), "White threatens e5");
     }
 }

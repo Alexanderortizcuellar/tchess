@@ -14,3 +14,4 @@ ratatui = "0.29"
 crossterm = "0.28"
 shakmaty = "0.27"
 pgn-reader = "0.27"
+scid-mgr = { git = "https://github.com/Alexanderortizcuellar/scid-mgr.git" }
