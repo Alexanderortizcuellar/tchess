@@ -1,0 +1,16 @@
+[package]
+name = "tchess"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alexander Ortiz <Alexanderortizcuellar@users.noreply.github.com>"]
+description = "A responsive, modern terminal chessboard widget and PGN game navigator built with Ratatui and Rust"
+readme = "README.md"
+license = "MIT"
+keywords = ["chess", "tui", "ratatui", "terminal", "pgn"]
+categories = ["command-line-utilities", "games"]
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+shakmaty = "0.27"
+pgn-reader = "0.27"
