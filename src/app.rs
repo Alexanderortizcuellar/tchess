@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Row, Table, Tabs},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Tabs},
     Frame,
 };
 use scid_mgr::db::GameSummary;
@@ -837,20 +837,213 @@ impl App {
         );
         f.render_widget(banner_para, chunks[0]);
 
-        // Games Table
-        let visible_rows = chunks[1].height.saturating_sub(2) as usize;
-        let mut rows = Vec::new();
+        let is_compact = chunks[1].width < 80;
 
-        if let Some(db) = &self.db_mgr {
-            let total = db.game_count();
-            let start_idx = if self.selected_db_idx >= visible_rows {
-                self.selected_db_idx.saturating_sub(visible_rows / 2)
+        if is_compact {
+            let available_height = chunks[1].height.saturating_sub(2) as usize;
+            let items_per_page = (available_height / 2).max(1);
+            let mut list_items = Vec::new();
+
+            if let Some(db) = &self.db_mgr {
+                let total = db.game_count();
+                let start_idx = if self.selected_db_idx >= items_per_page {
+                    self.selected_db_idx.saturating_sub(items_per_page / 2)
+                } else {
+                    0
+                };
+
+                for idx in start_idx..(start_idx + items_per_page).min(total) {
+                    if let Some(summary) = db.get_summary(idx) {
+                        let is_selected = idx == self.selected_db_idx;
+                        let prefix = if is_selected { "▶ " } else { "  " };
+
+                        let w_elo = if summary.white_elo > 0 {
+                            format!(" ({})", summary.white_elo)
+                        } else {
+                            String::new()
+                        };
+                        let b_elo = if summary.black_elo > 0 {
+                            format!(" ({})", summary.black_elo)
+                        } else {
+                            String::new()
+                        };
+
+                        let num_style = if is_selected {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::Cyan)
+                        };
+                        let name_style = if is_selected {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        let meta_style = if is_selected {
+                            Style::default().fg(Color::LightCyan)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        };
+                        let result_style = if is_selected {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD)
+                        };
+
+                        let line1 = Line::from(vec![
+                            Span::styled(format!("{}[{:>4}] ", prefix, idx + 1), num_style),
+                            Span::styled(format!("{}{}", summary.white, w_elo), name_style),
+                            Span::styled(" vs ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(format!("{}{}", summary.black, b_elo), name_style),
+                            Span::styled(format!("  [{}]", summary.result), result_style),
+                        ]);
+
+                        let line2 = Line::from(vec![
+                            Span::styled("       ", Style::default()),
+                            Span::styled(
+                                format!("{} • {} • {}", summary.date, summary.eco, summary.event),
+                                meta_style,
+                            ),
+                        ]);
+
+                        list_items.push(ListItem::new(vec![line1, line2]));
+                    }
+                }
             } else {
-                0
-            };
+                let start_idx = if self.selected_db_idx >= items_per_page {
+                    self.selected_db_idx.saturating_sub(items_per_page / 2)
+                } else {
+                    0
+                };
 
-            for idx in start_idx..(start_idx + visible_rows).min(total) {
-                if let Some(summary) = db.get_summary(idx) {
+                for (idx, (title, game)) in self
+                    .games
+                    .iter()
+                    .enumerate()
+                    .skip(start_idx)
+                    .take(items_per_page)
+                {
+                    let is_selected = idx == self.selected_db_idx;
+                    let prefix = if is_selected { "▶ " } else { "  " };
+
+                    let num_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    };
+                    let name_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    let meta_style = if is_selected {
+                        Style::default().fg(Color::LightCyan)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+
+                    let line1 = Line::from(vec![
+                        Span::styled(format!("{}[{:>4}] ", prefix, idx + 1), num_style),
+                        Span::styled(game.white_player().to_string(), name_style),
+                        Span::styled(" vs ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(game.black_player().to_string(), name_style),
+                        Span::styled(
+                            format!("  [{}]", game.result()),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]);
+
+                    let line2 = Line::from(vec![
+                        Span::styled("       ", Style::default()),
+                        Span::styled(title.clone(), meta_style),
+                    ]);
+
+                    list_items.push(ListItem::new(vec![line1, line2]));
+                }
+            }
+
+            let list = List::new(list_items).block(
+                Block::default()
+                    .title(" 📂 Games List ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            );
+            f.render_widget(list, chunks[1]);
+        } else {
+            // Games Table
+            let visible_rows = chunks[1].height.saturating_sub(2) as usize;
+            let mut rows = Vec::new();
+
+            if let Some(db) = &self.db_mgr {
+                let total = db.game_count();
+                let start_idx = if self.selected_db_idx >= visible_rows {
+                    self.selected_db_idx.saturating_sub(visible_rows / 2)
+                } else {
+                    0
+                };
+
+                for idx in start_idx..(start_idx + visible_rows).min(total) {
+                    if let Some(summary) = db.get_summary(idx) {
+                        let is_selected = idx == self.selected_db_idx;
+                        let style = if is_selected {
+                            Style::default()
+                                .fg(Color::Black)
+                                .bg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+
+                        rows.push(Row::new(vec![
+                            Span::styled(
+                                format!("{:>5}", idx + 1),
+                                if is_selected {
+                                    style
+                                } else {
+                                    Style::default().fg(Color::DarkGray)
+                                },
+                            ),
+                            Span::styled(summary.white, style),
+                            Span::styled(
+                                if summary.white_elo > 0 {
+                                    format!("{}", summary.white_elo)
+                                } else {
+                                    "-".to_string()
+                                },
+                                style,
+                            ),
+                            Span::styled(summary.black, style),
+                            Span::styled(
+                                if summary.black_elo > 0 {
+                                    format!("{}", summary.black_elo)
+                                } else {
+                                    "-".to_string()
+                                },
+                                style,
+                            ),
+                            Span::styled(summary.result, style),
+                            Span::styled(summary.date, style),
+                            Span::styled(summary.eco, style),
+                            Span::styled(summary.event, style),
+                        ]));
+                    }
+                }
+            } else {
+                // Display loaded sample games
+                for (idx, (title, game)) in self.games.iter().enumerate() {
                     let is_selected = idx == self.selected_db_idx;
                     let style = if is_selected {
                         Style::default()
@@ -870,144 +1063,98 @@ impl App {
                                 Style::default().fg(Color::DarkGray)
                             },
                         ),
-                        Span::styled(summary.white, style),
-                        Span::styled(
-                            if summary.white_elo > 0 {
-                                format!("{}", summary.white_elo)
-                            } else {
-                                "-".to_string()
-                            },
-                            style,
-                        ),
-                        Span::styled(summary.black, style),
-                        Span::styled(
-                            if summary.black_elo > 0 {
-                                format!("{}", summary.black_elo)
-                            } else {
-                                "-".to_string()
-                            },
-                            style,
-                        ),
-                        Span::styled(summary.result, style),
-                        Span::styled(summary.date, style),
-                        Span::styled(summary.eco, style),
-                        Span::styled(summary.event, style),
+                        Span::styled(game.white_player().to_string(), style),
+                        Span::styled("-", style),
+                        Span::styled(game.black_player().to_string(), style),
+                        Span::styled("-", style),
+                        Span::styled(game.result().to_string(), style),
+                        Span::styled("-", style),
+                        Span::styled("-", style),
+                        Span::styled(title.clone(), style),
                     ]));
                 }
             }
-        } else {
-            // Display loaded sample games
-            for (idx, (title, game)) in self.games.iter().enumerate() {
-                let is_selected = idx == self.selected_db_idx;
-                let style = if is_selected {
+
+            let header = Row::new(vec![
+                Span::styled(
+                    "    #",
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::White)
-                };
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "White",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Elo",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Black",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Elo",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Result",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Date",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "ECO",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Event",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]);
 
-                rows.push(Row::new(vec![
-                    Span::styled(
-                        format!("{:>5}", idx + 1),
-                        if is_selected {
-                            style
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        },
-                    ),
-                    Span::styled(game.white_player().to_string(), style),
-                    Span::styled("-", style),
-                    Span::styled(game.black_player().to_string(), style),
-                    Span::styled("-", style),
-                    Span::styled(game.result().to_string(), style),
-                    Span::styled("-", style),
-                    Span::styled("-", style),
-                    Span::styled(title.clone(), style),
-                ]));
-            }
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Length(6),
+                    Constraint::Percentage(22),
+                    Constraint::Length(6),
+                    Constraint::Percentage(22),
+                    Constraint::Length(6),
+                    Constraint::Length(8),
+                    Constraint::Length(11),
+                    Constraint::Length(6),
+                    Constraint::Percentage(25),
+                ],
+            )
+            .header(header)
+            .block(
+                Block::default()
+                    .title(" 📂 Games List ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            );
+            f.render_widget(table, chunks[1]);
         }
-
-        let header = Row::new(vec![
-            Span::styled(
-                "    #",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "White",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Elo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Black",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Elo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Result",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Date",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "ECO",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Event",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
-
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(6),
-                Constraint::Percentage(22),
-                Constraint::Length(6),
-                Constraint::Percentage(22),
-                Constraint::Length(6),
-                Constraint::Length(8),
-                Constraint::Length(11),
-                Constraint::Length(6),
-                Constraint::Percentage(25),
-            ],
-        )
-        .header(header)
-        .block(
-            Block::default()
-                .title(" 📂 Games List ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        );
-        f.render_widget(table, chunks[1]);
 
         // Controls
         let controls = Paragraph::new(
@@ -1106,148 +1253,241 @@ impl App {
         );
         f.render_widget(status_para, chunks[1]);
 
-        // Results Table
-        let visible_rows = chunks[2].height.saturating_sub(2) as usize;
-        let mut rows = Vec::new();
+        let is_compact = chunks[2].width < 80;
 
-        if !self.query_results.is_empty() {
-            let total = self.query_results.len();
-            let start_idx = if self.query_selected_idx >= visible_rows {
-                self.query_selected_idx.saturating_sub(visible_rows / 2)
-            } else {
-                0
-            };
+        if is_compact {
+            let available_height = chunks[2].height.saturating_sub(2) as usize;
+            let items_per_page = (available_height / 2).max(1);
+            let mut list_items = Vec::new();
 
-            for idx in start_idx..(start_idx + visible_rows).min(total) {
-                let (game_id, summary) = &self.query_results[idx];
-                let is_selected = idx == self.query_selected_idx && self.query_focus_results;
-                let style = if is_selected {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+            if !self.query_results.is_empty() {
+                let total = self.query_results.len();
+                let start_idx = if self.query_selected_idx >= items_per_page {
+                    self.query_selected_idx.saturating_sub(items_per_page / 2)
                 } else {
-                    Style::default().fg(Color::White)
+                    0
                 };
 
-                rows.push(Row::new(vec![
-                    Span::styled(
-                        format!("{:>5}", game_id + 1),
-                        if is_selected {
-                            style
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        },
-                    ),
-                    Span::styled(summary.white.clone(), style),
-                    Span::styled(
-                        if summary.white_elo > 0 {
-                            format!("{}", summary.white_elo)
-                        } else {
-                            "-".to_string()
-                        },
-                        style,
-                    ),
-                    Span::styled(summary.black.clone(), style),
-                    Span::styled(
-                        if summary.black_elo > 0 {
-                            format!("{}", summary.black_elo)
-                        } else {
-                            "-".to_string()
-                        },
-                        style,
-                    ),
-                    Span::styled(summary.result.clone(), style),
-                    Span::styled(summary.date.clone(), style),
-                    Span::styled(summary.eco.clone(), style),
-                    Span::styled(summary.event.clone(), style),
-                ]));
+                for idx in start_idx..(start_idx + items_per_page).min(total) {
+                    let (game_id, summary) = &self.query_results[idx];
+                    let is_selected = idx == self.query_selected_idx && self.query_focus_results;
+                    let prefix = if is_selected { "▶ " } else { "  " };
+
+                    let w_elo = if summary.white_elo > 0 {
+                        format!(" ({})", summary.white_elo)
+                    } else {
+                        String::new()
+                    };
+                    let b_elo = if summary.black_elo > 0 {
+                        format!(" ({})", summary.black_elo)
+                    } else {
+                        String::new()
+                    };
+
+                    let num_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    };
+                    let name_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    let meta_style = if is_selected {
+                        Style::default().fg(Color::LightCyan)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    let result_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
+                    };
+
+                    let line1 = Line::from(vec![
+                        Span::styled(format!("{}[{:>4}] ", prefix, game_id + 1), num_style),
+                        Span::styled(format!("{}{}", summary.white, w_elo), name_style),
+                        Span::styled(" vs ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("{}{}", summary.black, b_elo), name_style),
+                        Span::styled(format!("  [{}]", summary.result), result_style),
+                    ]);
+
+                    let line2 = Line::from(vec![
+                        Span::styled("       ", Style::default()),
+                        Span::styled(
+                            format!("{} • {} • {}", summary.date, summary.eco, summary.event),
+                            meta_style,
+                        ),
+                    ]);
+
+                    list_items.push(ListItem::new(vec![line1, line2]));
+                }
             }
-        }
 
-        let header = Row::new(vec![
-            Span::styled(
-                "    #",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "White",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Elo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Black",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Elo",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Result",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Date",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "ECO",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Event",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
+            let list = List::new(list_items).block(
+                Block::default()
+                    .title(format!(" 📂 Matches ({}) ", self.query_results.len()))
+                    .borders(Borders::ALL)
+                    .border_style(if self.query_focus_results {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    }),
+            );
+            f.render_widget(list, chunks[2]);
+        } else {
+            // Results Table
+            let visible_rows = chunks[2].height.saturating_sub(2) as usize;
+            let mut rows = Vec::new();
 
-        let results_table = Table::new(
-            rows,
-            [
-                Constraint::Length(6),
-                Constraint::Percentage(22),
-                Constraint::Length(6),
-                Constraint::Percentage(22),
-                Constraint::Length(6),
-                Constraint::Length(8),
-                Constraint::Length(11),
-                Constraint::Length(6),
-                Constraint::Percentage(25),
-            ],
-        )
-        .header(header)
-        .block(
-            Block::default()
-                .title(format!(" Matches ({}) ", self.query_results.len()))
-                .borders(Borders::ALL)
-                .border_style(if self.query_focus_results {
-                    Color::Yellow
+            if !self.query_results.is_empty() {
+                let total = self.query_results.len();
+                let start_idx = if self.query_selected_idx >= visible_rows {
+                    self.query_selected_idx.saturating_sub(visible_rows / 2)
                 } else {
-                    Color::DarkGray
-                }),
-        );
-        f.render_widget(results_table, chunks[2]);
+                    0
+                };
+
+                for idx in start_idx..(start_idx + visible_rows).min(total) {
+                    let (game_id, summary) = &self.query_results[idx];
+                    let is_selected = idx == self.query_selected_idx && self.query_focus_results;
+                    let style = if is_selected {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+
+                    rows.push(Row::new(vec![
+                        Span::styled(
+                            format!("{:>5}", game_id + 1),
+                            if is_selected {
+                                style
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            },
+                        ),
+                        Span::styled(summary.white.clone(), style),
+                        Span::styled(
+                            if summary.white_elo > 0 {
+                                format!("{}", summary.white_elo)
+                            } else {
+                                "-".to_string()
+                            },
+                            style,
+                        ),
+                        Span::styled(summary.black.clone(), style),
+                        Span::styled(
+                            if summary.black_elo > 0 {
+                                format!("{}", summary.black_elo)
+                            } else {
+                                "-".to_string()
+                            },
+                            style,
+                        ),
+                        Span::styled(summary.result.clone(), style),
+                        Span::styled(summary.date.clone(), style),
+                        Span::styled(summary.eco.clone(), style),
+                        Span::styled(summary.event.clone(), style),
+                    ]));
+                }
+            }
+
+            let header = Row::new(vec![
+                Span::styled(
+                    "    #",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "White",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Elo",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Black",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Elo",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Result",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Date",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "ECO",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Event",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]);
+
+            let results_table = Table::new(
+                rows,
+                [
+                    Constraint::Length(6),
+                    Constraint::Percentage(22),
+                    Constraint::Length(6),
+                    Constraint::Percentage(22),
+                    Constraint::Length(6),
+                    Constraint::Length(8),
+                    Constraint::Length(11),
+                    Constraint::Length(6),
+                    Constraint::Percentage(25),
+                ],
+            )
+            .header(header)
+            .block(
+                Block::default()
+                    .title(format!(" Matches ({}) ", self.query_results.len()))
+                    .borders(Borders::ALL)
+                    .border_style(if self.query_focus_results {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    }),
+            );
+            f.render_widget(results_table, chunks[2]);
+        }
 
         // Controls
         let controls = Paragraph::new(
